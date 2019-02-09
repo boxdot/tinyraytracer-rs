@@ -1,4 +1,8 @@
+use nalgebra as na;
 use png::HasParameters;
+
+type Vec3f = na::Vector3<f32>;
+type Vec4f = na::Vector4<f32>;
 
 use std::cmp::Ordering;
 use std::env;
@@ -6,99 +10,7 @@ use std::error::Error;
 use std::f32;
 use std::fs::File;
 use std::io::BufWriter;
-use std::ops::{Add, Mul, Neg, Sub};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Vec4f(f32, f32, f32, f32);
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Vec3f(f32, f32, f32);
-
-impl Vec3f {
-    const ZERO: Vec3f = Vec3f(0., 0., 0.);
-
-    fn norm(&self) -> f32 {
-        let norm_square = self.dot(self);
-        norm_square.sqrt()
-    }
-
-    fn normalize(&self) -> Self {
-        let norm = self.norm();
-        Self(self.0 / norm, self.1 / norm, self.2 / norm)
-    }
-
-    fn dot(&self, other: &Self) -> f32 {
-        self.0 * other.0 + self.1 * other.1 + self.2 * other.2
-    }
-}
-
-impl Neg for &Vec3f {
-    type Output = Vec3f;
-    fn neg(self) -> Self::Output {
-        Vec3f(-self.0, -self.1, -self.2)
-    }
-}
-
-impl Neg for Vec3f {
-    type Output = Vec3f;
-    fn neg(self) -> Self::Output {
-        -&self
-    }
-}
-
-impl Add<Vec3f> for &Vec3f {
-    type Output = Vec3f;
-    fn add(self, other: Vec3f) -> Self::Output {
-        Vec3f(self.0 + other.0, self.1 + other.1, self.2 + other.2)
-    }
-}
-
-impl Add<Vec3f> for Vec3f {
-    type Output = Vec3f;
-    fn add(self, other: Vec3f) -> Self::Output {
-        &self + other
-    }
-}
-
-impl Sub<&Vec3f> for Vec3f {
-    type Output = Self;
-    fn sub(self, other: &Vec3f) -> Self::Output {
-        Vec3f(self.0 - other.0, self.1 - other.1, self.2 - other.2)
-    }
-}
-
-impl Sub<&Vec3f> for &Vec3f {
-    type Output = Vec3f;
-    fn sub(self, other: &Vec3f) -> Self::Output {
-        Vec3f(self.0 - other.0, self.1 - other.1, self.2 - other.2)
-    }
-}
-
-impl Sub<Vec3f> for Vec3f {
-    type Output = Vec3f;
-    fn sub(self, other: Vec3f) -> Self::Output {
-        Vec3f(self.0 - other.0, self.1 - other.1, self.2 - other.2)
-    }
-}
-
-impl Mul<f32> for &Vec3f {
-    type Output = Vec3f;
-    fn mul(self, scalar: f32) -> Self::Output {
-        Vec3f(scalar * self.0, scalar * self.1, scalar * self.2)
-    }
-}
-
-impl Mul<f32> for Vec3f {
-    type Output = Vec3f;
-    fn mul(self, scalar: f32) -> Self::Output {
-        &self * scalar
-    }
-}
-
-fn clap(val: f32) -> u8 {
-    (255f32 * val.max(0f32).min(1f32)) as u8
-}
 
 #[derive(Debug)]
 struct Sphere {
@@ -164,8 +76,8 @@ impl Default for Material {
     fn default() -> Self {
         Self {
             refractive_index: 1.,
-            albedo: Vec4f(1., 0., 0., 0.),
-            diffuse_color: Vec3f::ZERO,
+            albedo: Vec4f::new(1., 0., 0., 0.),
+            diffuse_color: Vec3f::zeros(),
             specular_exponent: 0.,
         }
     }
@@ -194,7 +106,7 @@ impl Light {
 }
 
 fn reflect(i: &Vec3f, n: &Vec3f) -> Vec3f {
-    i - &(n * 2. * i.dot(n))
+    i - n * 2. * i.dot(n)
 }
 
 // Snell's law
@@ -208,7 +120,7 @@ fn refract(i: &Vec3f, n: &Vec3f, eta_t: f32, eta_i: f32) -> Vec3f {
         let k = 1. - eta * eta * (1. - cosi * cosi);
         // k < 0 = total reflection, no ray to refract. I refract it anyways, this has no physical meaning
         if k < 0. {
-            Vec3f(1., 0., 0.)
+            Vec3f::new(1., 0., 0.)
         } else {
             i * eta + n * (eta * cosi - k.sqrt())
         }
@@ -222,7 +134,7 @@ fn scene_intersect(orig: &Vec3f, dir: &Vec3f, spheres: &[Sphere]) -> Option<Inte
         .min_by(|(_, t0), (_, t1)| t0.partial_cmp(t1).unwrap_or(Ordering::Equal))
         .map(|(sphere, dist)| {
             let point = orig + dir * dist;
-            let normal = (point - &sphere.center).normalize();
+            let normal = (point - sphere.center).normalize();
             Intersection {
                 dist,
                 point,
@@ -232,23 +144,23 @@ fn scene_intersect(orig: &Vec3f, dir: &Vec3f, spheres: &[Sphere]) -> Option<Inte
         });
 
     // checkerboard intersection
-    if dir.1.abs() > 1e-3 {
-        let dist = -(orig.1 + 4.) / dir.1; // the checkerboard plane has equation y = -4
+    if dir.y.abs() > 1e-3 {
+        let dist = -(orig.y + 4.) / dir.y; // the checkerboard plane has equation y = -4
         let point = orig + dir * dist;
         if dist > 0.
-            && point.0.abs() < 10.0
-            && point.2 < -10.0
-            && point.2 > -30.0
+            && point.x.abs() < 10.0
+            && point.z < -10.0
+            && point.z > -30.0
             && spheres_intersection
                 .as_ref()
                 .map(|i| dist < i.dist)
                 .unwrap_or(true)
         {
             let diffuse_color =
-                if ((0.5 * point.0 + 1000.) as i32 + (0.5 * point.2) as i32) & 1 == 1 {
-                    Vec3f(1., 1., 1.)
+                if ((0.5 * point.x + 1000.) as i32 + (0.5 * point.z) as i32) & 1 == 1 {
+                    Vec3f::new(1., 1., 1.)
                 } else {
-                    Vec3f(1., 0.7, 0.3)
+                    Vec3f::new(1., 0.7, 0.3)
                 };
             let material = Material {
                 diffuse_color: diffuse_color * 0.3,
@@ -257,7 +169,7 @@ fn scene_intersect(orig: &Vec3f, dir: &Vec3f, spheres: &[Sphere]) -> Option<Inte
             return Some(Intersection {
                 dist,
                 point,
-                normal: Vec3f(0., 1., 0.),
+                normal: Vec3f::new(0., 1., 0.),
                 material,
             });
         }
@@ -274,7 +186,7 @@ fn cast_ray(
     depth: usize,
 ) -> Vec3f {
     if depth > 4 {
-        return Vec3f(0.2, 0.7, 0.8); // background color
+        return Vec3f::new(0.2, 0.7, 0.8); // background color
     }
 
     if let Some(Intersection {
@@ -303,8 +215,8 @@ fn cast_ray(
 
         let (diffuse_light_intensity, specular_light_intensity) =
             lights.iter().fold((0., 0.), |(diff, spec), light| {
-                let light_dir = (light.position - &point).normalize();
-                let light_distance = (light.position - &point).norm();
+                let light_dir = (light.position - point).normalize();
+                let light_distance = (light.position - point).norm();
 
                 // checking if the point lies in the shadow of the light
                 let shadow_orig = if light_dir.dot(&normal) < 0.0 {
@@ -331,13 +243,17 @@ fn cast_ray(
                 )
             });
 
-        material.diffuse_color * diffuse_light_intensity * material.albedo.0
-            + Vec3f(1., 1., 1.) * specular_light_intensity * material.albedo.1
-            + reflect_color * material.albedo.2
-            + refract_color * material.albedo.3
+        material.diffuse_color * diffuse_light_intensity * material.albedo[0]
+            + Vec3f::new(1., 1., 1.) * specular_light_intensity * material.albedo[1]
+            + reflect_color * material.albedo[2]
+            + refract_color * material.albedo[3]
     } else {
-        Vec3f(0.2, 0.7, 0.8) // background color
+        Vec3f::new(0.2, 0.7, 0.8) // background color
     }
+}
+
+fn clap(val: f32) -> u8 {
+    (255f32 * val.max(0f32).min(1f32)) as u8
 }
 
 fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
@@ -345,14 +261,14 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
     const HEIGHT: usize = 768;
     const FOV: f32 = f32::consts::PI / 2.;
 
-    let mut framebuffer: Vec<Vec3f> = vec![Vec3f::ZERO; WIDTH * HEIGHT];
+    let mut framebuffer: Vec<Vec3f> = vec![Vec3f::zeros(); WIDTH * HEIGHT];
     for j in 0..HEIGHT {
         for i in 0..WIDTH {
             let x = (2. * (i as f32 + 0.5) / WIDTH as f32 - 1.) * (FOV / 2.).tan() * WIDTH as f32
                 / HEIGHT as f32;
             let y = -(2. * (j as f32 + 0.5) / HEIGHT as f32 - 1.) * (FOV / 2.).tan();
-            let dir = Vec3f(x, y, -1.).normalize();
-            framebuffer[i + j * WIDTH] = cast_ray(&Vec3f::ZERO, &dir, spheres, lights, 0);
+            let dir = Vec3f::new(x, y, -1.).normalize();
+            framebuffer[i + j * WIDTH] = cast_ray(&Vec3f::zeros(), &dir, spheres, lights, 0);
         }
     }
 
@@ -366,9 +282,9 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
 
     let mut data = Vec::new();
     for v in framebuffer {
-        data.push(clap(v.0));
-        data.push(clap(v.1));
-        data.push(clap(v.2));
+        data.push(clap(v[0]));
+        data.push(clap(v[1]));
+        data.push(clap(v[2]));
         data.push(255);
     }
     writer.write_image_data(&data)?;
@@ -377,22 +293,42 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
 }
 
 fn main() -> Result<(), Box<Error>> {
-    let ivory = Material::new(1.0, Vec4f(0.6, 0.3, 0.1, 0.0), Vec3f(0.4, 0.4, 0.3), 50.);
-    let glass = Material::new(1.5, Vec4f(0.0, 0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8), 125.);
-    let red_rubber = Material::new(1.0, Vec4f(0.9, 0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1), 10.);
-    let mirror = Material::new(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
+    let ivory = Material::new(
+        1.0,
+        Vec4f::new(0.6, 0.3, 0.1, 0.0),
+        Vec3f::new(0.4, 0.4, 0.3),
+        50.,
+    );
+    let glass = Material::new(
+        1.5,
+        Vec4f::new(0.0, 0.5, 0.1, 0.8),
+        Vec3f::new(0.6, 0.7, 0.8),
+        125.,
+    );
+    let red_rubber = Material::new(
+        1.0,
+        Vec4f::new(0.9, 0.1, 0.0, 0.0),
+        Vec3f::new(0.3, 0.1, 0.1),
+        10.,
+    );
+    let mirror = Material::new(
+        1.0,
+        Vec4f::new(0.0, 10.0, 0.8, 0.0),
+        Vec3f::new(1.0, 1.0, 1.0),
+        1425.,
+    );
 
     let spheres = vec![
-        Sphere::new(Vec3f(-3., 0., -16.), 2., ivory),
-        Sphere::new(Vec3f(-1.0, -1.5, -12.), 2., glass),
-        Sphere::new(Vec3f(1.5, -0.5, -18.), 3., red_rubber),
-        Sphere::new(Vec3f(7., 5., -18.), 4., mirror),
+        Sphere::new(Vec3f::new(-3., 0., -16.), 2., ivory),
+        Sphere::new(Vec3f::new(-1.0, -1.5, -12.), 2., glass),
+        Sphere::new(Vec3f::new(1.5, -0.5, -18.), 3., red_rubber),
+        Sphere::new(Vec3f::new(7., 5., -18.), 4., mirror),
     ];
 
     let lights = vec![
-        Light::new(Vec3f(-20., 20., 20.), 1.5),
-        Light::new(Vec3f(30., 50., -25.), 1.8),
-        Light::new(Vec3f(30., 20., 30.), 1.7),
+        Light::new(Vec3f::new(-20., 20., 20.), 1.5),
+        Light::new(Vec3f::new(30., 50., -25.), 1.8),
+        Light::new(Vec3f::new(30., 20., 30.), 1.7),
     ];
 
     render(&spheres, &lights)

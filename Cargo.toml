@@ -1,8 +1,9 @@
 [package]
-name = "tinyraytracer-rs"
+name = "tinyraytracer"
 version = "0.1.0"
 authors = ["boxdot <d@zerovolt.org>"]
 edition = "2018"
 
 [dependencies]
+nalgebra = "0.17.0"
 png = "0.14.0"
