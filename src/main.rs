@@ -105,6 +105,14 @@ impl Light {
     }
 }
 
+fn offset(point: &Vec3f, normal: &Vec3f, dir: &Vec3f) -> Vec3f {
+    if dir.dot(&normal) < 0. {
+        point - normal * 1e-3
+    } else {
+        point + normal * 1e-3
+    }
+}
+
 fn reflect(i: &Vec3f, n: &Vec3f) -> Vec3f {
     i - n * 2. * i.dot(n)
 }
@@ -148,9 +156,9 @@ fn scene_intersect(orig: &Vec3f, dir: &Vec3f, spheres: &[Sphere]) -> Option<Inte
         let dist = -(orig.y + 4.) / dir.y; // the checkerboard plane has equation y = -4
         let point = orig + dir * dist;
         if dist > 0.
-            && point.x.abs() < 10.0
-            && point.z < -10.0
-            && point.z > -30.0
+            && point.x.abs() < 10.
+            && point.z < -10.
+            && point.z > -30.
             && spheres_intersection
                 .as_ref()
                 .map(|i| dist < i.dist)
@@ -190,26 +198,16 @@ fn cast_ray(
     }
 
     if let Some(Intersection {
-        point,
-        normal,
+        ref point,
+        ref normal,
         material,
         ..
     }) = scene_intersect(orig, dir, spheres)
     {
-        let reflect_dir = reflect(dir, &normal).normalize();
-        let refract_dir = refract(dir, &normal, material.refractive_index, 1.).normalize();
-        // offset the original point to avoid occlusion by the object itself
-        let reflect_orig = if reflect_dir.dot(&normal) < 0.0 {
-            point - normal * 1e-3
-        } else {
-            point + normal * 1e-3
-        };
-        let refract_orig = if refract_dir.dot(&normal) < 0.0 {
-            point - normal * 1e-3
-        } else {
-            point + normal * 1e-3
-        };
-
+        let reflect_dir = reflect(dir, normal).normalize();
+        let refract_dir = refract(dir, normal, material.refractive_index, 1.).normalize();
+        let reflect_orig = offset(point, normal, &reflect_dir);
+        let refract_orig = offset(point, normal, &refract_dir);
         let reflect_color = cast_ray(&reflect_orig, &reflect_dir, spheres, lights, depth + 1);
         let refract_color = cast_ray(&refract_orig, &refract_dir, spheres, lights, depth + 1);
 
@@ -219,11 +217,7 @@ fn cast_ray(
                 let light_distance = (light.position - point).norm();
 
                 // checking if the point lies in the shadow of the light
-                let shadow_orig = if light_dir.dot(&normal) < 0.0 {
-                    point - normal * 1e-3
-                } else {
-                    point + normal * 1e-3
-                };
+                let shadow_orig = offset(point, normal, &light_dir);
                 if let Some(Intersection {
                     point: shadow_pt, ..
                 }) = scene_intersect(&shadow_orig, &light_dir, spheres)
@@ -234,7 +228,7 @@ fn cast_ray(
                 }
 
                 (
-                    diff + light.intensity * light_dir.dot(&normal).max(0.),
+                    diff + light.intensity * light_dir.dot(normal).max(0.),
                     spec + (-reflect(&-light_dir, &normal))
                         .dot(&dir)
                         .max(0.)
@@ -252,8 +246,8 @@ fn cast_ray(
     }
 }
 
-fn clap(val: f32) -> u8 {
-    (255f32 * val.max(0f32).min(1f32)) as u8
+fn clamp(val: f32) -> u8 {
+    (255. * val.max(0.).min(1.)) as u8
 }
 
 fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
@@ -280,11 +274,11 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
     encoder.set(png::ColorType::RGBA).set(png::BitDepth::Eight);
     let mut writer = encoder.write_header()?;
 
-    let mut data = Vec::new();
+    let mut data = Vec::with_capacity(WIDTH * HEIGHT);
     for v in framebuffer {
-        data.push(clap(v[0]));
-        data.push(clap(v[1]));
-        data.push(clap(v[2]));
+        data.push(clamp(v[0]));
+        data.push(clamp(v[1]));
+        data.push(clamp(v[2]));
         data.push(255);
     }
     writer.write_image_data(&data)?;
@@ -294,33 +288,33 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
 
 fn main() -> Result<(), Box<Error>> {
     let ivory = Material::new(
-        1.0,
-        Vec4f::new(0.6, 0.3, 0.1, 0.0),
+        1.,
+        Vec4f::new(0.6, 0.3, 0.1, 0.),
         Vec3f::new(0.4, 0.4, 0.3),
         50.,
     );
     let glass = Material::new(
         1.5,
-        Vec4f::new(0.0, 0.5, 0.1, 0.8),
+        Vec4f::new(0., 0.5, 0.1, 0.8),
         Vec3f::new(0.6, 0.7, 0.8),
         125.,
     );
     let red_rubber = Material::new(
-        1.0,
-        Vec4f::new(0.9, 0.1, 0.0, 0.0),
+        1.,
+        Vec4f::new(0.9, 0.1, 0., 0.),
         Vec3f::new(0.3, 0.1, 0.1),
         10.,
     );
     let mirror = Material::new(
-        1.0,
-        Vec4f::new(0.0, 10.0, 0.8, 0.0),
-        Vec3f::new(1.0, 1.0, 1.0),
+        1.,
+        Vec4f::new(0., 10., 0.8, 0.),
+        Vec3f::new(1., 1., 1.),
         1425.,
     );
 
     let spheres = vec![
         Sphere::new(Vec3f::new(-3., 0., -16.), 2., ivory),
-        Sphere::new(Vec3f::new(-1.0, -1.5, -12.), 2., glass),
+        Sphere::new(Vec3f::new(-1., -1.5, -12.), 2., glass),
         Sphere::new(Vec3f::new(1.5, -0.5, -18.), 3., red_rubber),
         Sphere::new(Vec3f::new(7., 5., -18.), 4., mirror),
     ];
