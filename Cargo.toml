@@ -8,3 +8,11 @@ edition = "2018"
 nalgebra = "0.17.0"
 png = "0.14.0"
 jpeg-decoder = "0.1.15"
+
+[[bin]]
+name = "kaboom"
+path = "src/kaboom.rs"
+
+[[bin]]
+name = "raytracer"
+path = "src/raytracer.rs"
