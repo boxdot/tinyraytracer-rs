@@ -1,3 +1,4 @@
+use jpeg_decoder as jpeg;
 use nalgebra as na;
 use png::HasParameters;
 
@@ -9,8 +10,8 @@ use std::env;
 use std::error::Error;
 use std::f32;
 use std::fs::File;
-use std::io::BufWriter;
-use std::path::PathBuf;
+use std::io::{BufReader, BufWriter};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 struct Sphere {
@@ -186,15 +187,23 @@ fn scene_intersect(orig: &Vec3f, dir: &Vec3f, spheres: &[Sphere]) -> Option<Inte
     spheres_intersection
 }
 
+fn spherical_coordinates(normal: &Vec3f) -> (f32, f32) {
+    let s = normal.z.atan2(normal.x) / (2. * f32::consts::PI) + 0.5;
+    let t = normal.y.acos() / f32::consts::PI;
+    (s, t)
+}
+
 fn cast_ray(
     orig: &Vec3f,
     dir: &Vec3f,
     spheres: &[Sphere],
     lights: &[Light],
+    envmap: &Envmap,
     depth: usize,
 ) -> Vec3f {
     if depth > 4 {
-        return Vec3f::new(0.2, 0.7, 0.8); // background color
+        let (s, t) = spherical_coordinates(&dir.normalize());
+        return envmap.texture(s, t);
     }
 
     if let Some(Intersection {
@@ -208,8 +217,22 @@ fn cast_ray(
         let refract_dir = refract(dir, normal, material.refractive_index, 1.).normalize();
         let reflect_orig = offset(point, normal, &reflect_dir);
         let refract_orig = offset(point, normal, &refract_dir);
-        let reflect_color = cast_ray(&reflect_orig, &reflect_dir, spheres, lights, depth + 1);
-        let refract_color = cast_ray(&refract_orig, &refract_dir, spheres, lights, depth + 1);
+        let reflect_color = cast_ray(
+            &reflect_orig,
+            &reflect_dir,
+            spheres,
+            lights,
+            envmap,
+            depth + 1,
+        );
+        let refract_color = cast_ray(
+            &refract_orig,
+            &refract_dir,
+            spheres,
+            lights,
+            envmap,
+            depth + 1,
+        );
 
         let (diffuse_light_intensity, specular_light_intensity) =
             lights.iter().fold((0., 0.), |(diff, spec), light| {
@@ -242,7 +265,8 @@ fn cast_ray(
             + reflect_color * material.albedo[2]
             + refract_color * material.albedo[3]
     } else {
-        Vec3f::new(0.2, 0.7, 0.8) // background color
+        let (s, t) = spherical_coordinates(&dir.normalize());
+        envmap.texture(s, t)
     }
 }
 
@@ -250,7 +274,7 @@ fn clamp(val: f32) -> u8 {
     (255. * val.max(0.).min(1.)) as u8
 }
 
-fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
+fn render(spheres: &[Sphere], lights: &[Light], envmap: &Envmap) -> Result<(), Box<Error>> {
     const WIDTH: usize = 1024;
     const HEIGHT: usize = 768;
     const FOV: f32 = f32::consts::PI / 2.;
@@ -262,7 +286,8 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
                 / HEIGHT as f32;
             let y = -(2. * (j as f32 + 0.5) / HEIGHT as f32 - 1.) * (FOV / 2.).tan();
             let dir = Vec3f::new(x, y, -1.).normalize();
-            framebuffer[i + j * WIDTH] = cast_ray(&Vec3f::zeros(), &dir, spheres, lights, 0);
+            framebuffer[i + j * WIDTH] =
+                cast_ray(&Vec3f::zeros(), &dir, spheres, lights, envmap, 0);
         }
     }
 
@@ -284,6 +309,41 @@ fn render(spheres: &[Sphere], lights: &[Light]) -> Result<(), Box<Error>> {
     writer.write_image_data(&data)?;
 
     Ok(())
+}
+
+struct Envmap {
+    width: usize,
+    height: usize,
+    pixels: Vec<u8>,
+}
+
+impl Envmap {
+    fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<Error>> {
+        let file = File::open(path)?;
+        let mut decoder = jpeg::Decoder::new(BufReader::new(file));
+        let pixels = decoder.decode()?;
+        let metadata = dbg!(decoder.info().unwrap());
+        assert_eq!(
+            metadata.width as usize * metadata.height as usize * 3,
+            pixels.len()
+        );
+        Ok(Self {
+            width: metadata.width as usize,
+            height: metadata.height as usize,
+            pixels,
+        })
+    }
+
+    fn texture(&self, s: f32, t: f32) -> Vec3f {
+        let x = (s * self.width as f32) as usize;
+        let y = (t * self.height as f32) as usize;
+        let idx = (y * self.width + x) * 3;
+        Vec3f::new(
+            f32::from(self.pixels[idx]) / 255.,
+            f32::from(self.pixels[idx + 1]) / 255.,
+            f32::from(self.pixels[idx + 2]) / 255.,
+        )
+    }
 }
 
 fn main() -> Result<(), Box<Error>> {
@@ -325,5 +385,7 @@ fn main() -> Result<(), Box<Error>> {
         Light::new(Vec3f::new(30., 20., 30.), 1.7),
     ];
 
-    render(&spheres, &lights)
+    let envmap = Envmap::load("envmap.jpg")?;
+
+    render(&spheres, &lights, &envmap)
 }
