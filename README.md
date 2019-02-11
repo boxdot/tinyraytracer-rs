@@ -3,7 +3,7 @@
 Implementation of https://github.com/ssloy/tinyraytracer and https://github.com/ssloy/tinykaboom in
 Rust.
 
-# Run
+## Run
 
 ```
 cargo run --release --bin raytracer -- traced.png
