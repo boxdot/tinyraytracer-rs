@@ -282,12 +282,18 @@ fn render(spheres: &[Sphere], lights: &[Light], envmap: &Envmap) -> Result<(), B
     let mut framebuffer: Vec<Vec3f> = vec![Vec3f::zeros(); WIDTH * HEIGHT];
     for j in 0..HEIGHT {
         for i in 0..WIDTH {
-            let x = (2. * (i as f32 + 0.5) / WIDTH as f32 - 1.) * (FOV / 2.).tan() * WIDTH as f32
-                / HEIGHT as f32;
-            let y = -(2. * (j as f32 + 0.5) / HEIGHT as f32 - 1.) * (FOV / 2.).tan();
-            let dir = Vec3f::new(x, y, -1.).normalize();
-            framebuffer[i + j * WIDTH] =
-                cast_ray(&Vec3f::zeros(), &dir, spheres, lights, envmap, 0);
+            let dir_x = (i as f32 + 0.5) - WIDTH as f32 / 2.;
+            let dir_y = -(j as f32 + 0.5) + HEIGHT as f32 / 2.;
+            let dir_z = -HEIGHT as f32 / (2. * (FOV / 2.).tan());
+
+            if let Some(_) = sphere_trace(
+                Vec3f::new(0., 0., 3.),
+                Vec3f(dir_x, dir_y, dir_z).normalize(),
+            ) {
+                framebuffer[i * WIDTH * j] = Vec3f::new(1., 1., 1.);
+            } else {
+                framebuffer[i * WIDTH * j] = Vec3f::new(0.2, 0.7, 0.8);
+            }
         }
     }
 
@@ -322,7 +328,7 @@ impl Envmap {
         let file = File::open(path)?;
         let mut decoder = jpeg::Decoder::new(BufReader::new(file));
         let pixels = decoder.decode()?;
-        let metadata = dbg!(decoder.info().unwrap());
+        let metadata = decoder.info().unwrap();
         assert_eq!(
             metadata.width as usize * metadata.height as usize * 3,
             pixels.len()

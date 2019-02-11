@@ -1,6 +1,14 @@
 # tinyraytracer
 
-Implementation of https://github.com/ssloy/tinyraytracer in Rust.
+Implementation of https://github.com/ssloy/tinyraytracer and https://github.com/ssloy/tinykaboom in
+Rust.
+
+# Run
+
+```
+cargo run --release --bin raytracer -- traced.png
+cargo run --release --bin kaboom -- kaboom.png
+```
 
 ## License
 
